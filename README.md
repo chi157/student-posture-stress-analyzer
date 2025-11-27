@@ -1,11 +1,3 @@
-當然可以，從這裡開始，我會**一個一個做**，先完成你要的：
-
-# ✅ **1. 完整且詳盡的 README.md（可直接放到你的專案根目錄）**
-
-你可以直接把下面內容整段貼進 `README.md` 檔案內（已包含教學、流程、指令、檔案架構、GPU 建議等）。
-
----
-
 # 📘 Student Posture & Stress Detection
 
 基於 MediaPipe + RandomForest + 自建資料集的**學生坐姿偵測**、**專注度偵測**、**壓力行為偵測**專案。
@@ -27,12 +19,12 @@
 
 ---
 
-# 📁 目錄架構（最新版）
+# 📁 目錄架構
 
 ```
 student_posture_stress/
 │
-├─ data_raw/                  # 原始錄影資料（你自己錄）
+├─ data_raw/                  # 原始錄影資料
 │   ├─ posture/
 │   ├─ stress/
 │   └─ baseline/
@@ -64,9 +56,9 @@ student_posture_stress/
 
 ---
 
-# 🎥 資料收集指引（重要）
+# 🎥 資料收集指引
 
-每種行為拍 **三段影片**（每段 10–15 秒即可）。
+每種行為拍 **三段影片**（每段 10–15 秒）。
 
 ## 姿勢（posture）
 
@@ -190,8 +182,6 @@ MediaPipe Pose **基本上依賴 CPU**，沒有硬性要求 GPU。
 但如果你未來換深度學習模型（如 MoveNet / BlazePose GPU 最佳化），建議以下規格：
 
 ## ✔ 你目前的硬體
-
-（你可以告訴我型號，我幫你補上專屬描述）
 
 假設你目前使用 **筆電 / 桌電 CPU 就能跑**
 標準 MediaPipe Pose 近乎 30fps。
