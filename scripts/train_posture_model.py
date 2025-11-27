@@ -18,24 +18,21 @@ train_posture_model.py
 輸出：
     - models/posture_model.joblib   （內含：model, label_encoder, feature_columns）
 
-使用方式（請在專案根目錄執行，例如 VSCode 終端機）：
+建議使用方式（在專案根目錄）：
 
-    # 一般流程（建議）：
     # 1. 先抽 landmarks
     python scripts/extract_landmarks.py
 
     # 2. 再做資料增強（可選，但很推薦）
     python scripts/augment_dataset.py --num-aug 3
 
-    # 3. 訓練姿勢模型（會自動找 augmented 檔案）
-    python scripts/train_posture_model.py
+    # 3. 訓練姿勢模型
+    python -m scripts.train_posture_model
 
-    # 如果想指定輸入 / 模型輸出檔名：
-    python scripts/train_posture_model.py ^
-        --input data_augmented/all_landmarks_augmented.csv ^
-        --model-out models/posture_model.joblib
+    # 或明確指定輸入與輸出：
+    python -m scripts.train_posture_model --input data_augmented/all_landmarks_augmented.csv --model-out models/posture_model.joblib
 
-需要套件（建議寫進 requirements.txt）：
+需要套件：
     - pandas
     - numpy
     - scikit-learn
@@ -53,9 +50,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
 import joblib
 
+from scripts.utils.data_utils import load_dataset, select_category_rows, split_original_and_augmented
+from scripts.utils.feature_utils import get_feature_columns
+
 # 專案根目錄（scripts/ 的上一層）
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_LANDMARKS_DIR = PROJECT_ROOT / "data_landmarks"
 DATA_AUGMENTED_DIR = PROJECT_ROOT / "data_augmented"
 MODELS_DIR = PROJECT_ROOT / "models"
 
@@ -104,95 +103,6 @@ def parse_args():
     return parser.parse_args()
 
 
-def load_dataset(input_path: Path) -> pd.DataFrame:
-    """
-    嘗試讀取 input_path，如果不存在，改讀 data_landmarks/all_landmarks.csv。
-    """
-    if input_path.exists():
-        print(f"[INFO] 使用輸入檔案：{input_path}")
-        df = pd.read_csv(input_path)
-    else:
-        fallback = DATA_LANDMARKS_DIR / "all_landmarks.csv"
-        if not fallback.exists():
-            raise FileNotFoundError(
-                f"找不到輸入檔案：{input_path}，也找不到備用檔案：{fallback}"
-            )
-        print(f"[WARN] 找不到 {input_path}，改用：{fallback}")
-        df = pd.read_csv(fallback)
-
-    print(f"[INFO] 原始總筆數：{len(df)}")
-    return df
-
-
-def select_posture_rows(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    只保留 category == 'posture' 的資料作為姿勢模型的資料。
-    """
-    if "category" not in df.columns:
-        raise ValueError("資料中找不到 'category' 欄位，請確認 extract_landmarks.py 的輸出格式。")
-
-    df_posture = df[df["category"] == "posture"].copy()
-    print(f"[INFO] 姿勢資料筆數（category == 'posture'）：{len(df_posture)}")
-
-    if len(df_posture) == 0:
-        raise ValueError("沒有任何 category == 'posture' 的資料，請確認 data_raw/posture 有影片。")
-
-    return df_posture
-
-
-def split_original_and_augmented(df_posture: pd.DataFrame):
-    """
-    將姿勢資料分為原始資料 & 增強資料。
-    如果沒有 is_augmented 欄位，全部視為原始資料。
-    """
-    if "is_augmented" not in df_posture.columns:
-        print("[WARN] 找不到 is_augmented 欄位，視所有資料為原始資料。")
-        df_orig = df_posture.copy()
-        df_aug = df_posture.iloc[0:0].copy()  # 空 DataFrame
-    else:
-        df_orig = df_posture[df_posture["is_augmented"] == 0].copy()
-        df_aug = df_posture[df_posture["is_augmented"] == 1].copy()
-        print(f"[INFO] 原始資料筆數：{len(df_orig)}")
-        print(f"[INFO] 增強資料筆數：{len(df_aug)}")
-
-        if len(df_orig) == 0:
-            print("[WARN] 沒有 is_augmented == 0 的資料，全部視為原始資料。")
-            df_orig = df_posture.copy()
-            df_aug = df_posture.iloc[0:0].copy()
-
-    return df_orig, df_aug
-
-
-def get_feature_columns(df: pd.DataFrame):
-    """
-    取出特徵欄位（x_*, y_*, z_*, v_*），排除 meta 欄位。
-    """
-    exclude_cols = {
-        "video_path",
-        "frame_idx",
-        "category",
-        "sub_label",
-        "label",
-        "is_augmented",
-        "aug_id",
-    }
-
-    feature_cols = [
-        c
-        for c in df.columns
-        if (
-            (c.startswith("x_") or c.startswith("y_") or c.startswith("z_") or c.startswith("v_"))
-            and c not in exclude_cols
-        )
-    ]
-
-    if not feature_cols:
-        raise ValueError("找不到任何特徵欄位 (x_*, y_*, z_*, v_*)，請確認資料格式。")
-
-    print(f"[INFO] 使用的特徵欄位數量：{len(feature_cols)}")
-    return feature_cols
-
-
 def main():
     args = parse_args()
 
@@ -200,11 +110,11 @@ def main():
     model_out_path = Path(args.model_out)
     model_out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 1. 讀資料
+    # 1. 讀資料（含 fallback 機制）
     df = load_dataset(input_path)
 
-    # 2. 專注於姿勢資料
-    df_posture = select_posture_rows(df)
+    # 2. 只取姿勢資料
+    df_posture = select_category_rows(df, "posture")
 
     # 3. 切原始 & 增強
     df_orig, df_aug = split_original_and_augmented(df_posture)
@@ -212,16 +122,15 @@ def main():
     # 4. 決定特徵欄位
     feature_cols = get_feature_columns(df_posture)
 
-    # 5. 設定標籤（用 sub_label 做多類別，例如 good_posture / slouch / look_left ...）
+    # 5. 設定標籤（用 sub_label 當多類別）
     target_col = "sub_label"
     if target_col not in df_posture.columns:
         raise ValueError("資料中找不到 'sub_label' 欄位，請確認 extract_landmarks.py 的輸出格式。")
 
-    # 只用原始資料來做切分
     X_orig = df_orig[feature_cols].values.astype(np.float32)
     y_orig = df_orig[target_col].astype(str).values
 
-    # 6. 切 train / test  (先切出 test)
+    # 6. 切 train / test
     test_size = args.test_size
     val_size = args.val_size
 
@@ -237,7 +146,7 @@ def main():
     )
 
     # 7. 再從 trainval 裡面切出 val
-    val_ratio = val_size / (1.0 - test_size)  # e.g. 0.15 / 0.85
+    val_ratio = val_size / (1.0 - test_size)
     X_train, X_val, y_train, y_val = train_test_split(
         X_trainval,
         y_trainval,
@@ -250,7 +159,7 @@ def main():
     print(f"[INFO] Val   原始資料筆數：{len(X_val)}")
     print(f"[INFO] Test  原始資料筆數：{len(X_test)}")
 
-    # 8. 如果有增強資料，加入 train
+    # 8. 把增強資料加入 Train
     if len(df_aug) > 0:
         X_aug = df_aug[feature_cols].values.astype(np.float32)
         y_aug = df_aug[target_col].astype(str).values
@@ -271,7 +180,7 @@ def main():
     for cls_idx, cls_name in enumerate(label_encoder.classes_):
         print(f"  {cls_idx}: {cls_name}")
 
-    # 10. 建立模型（RandomForest）
+    # 10. 建立模型
     clf = RandomForestClassifier(
         n_estimators=200,
         max_depth=None,
@@ -279,24 +188,24 @@ def main():
         n_jobs=-1,
     )
 
-    print("[INFO] 開始訓練模型（RandomForestClassifier）...")
+    print("[INFO] 開始訓練姿勢模型（RandomForestClassifier）...")
     clf.fit(X_train, y_train_enc)
 
-    # 11. 評估：Val
+    # 11. 驗證集
     print("\n[INFO] 驗證集結果 (Val)：")
     y_val_pred = clf.predict(X_val)
     print(classification_report(y_val_enc, y_val_pred, target_names=label_encoder.classes_))
     print("Confusion Matrix (Val):")
     print(confusion_matrix(y_val_enc, y_val_pred))
 
-    # 12. 評估：Test
+    # 12. 測試集
     print("\n[INFO] 測試集結果 (Test)：")
     y_test_pred = clf.predict(X_test)
     print(classification_report(y_test_enc, y_test_pred, target_names=label_encoder.classes_))
     print("Confusion Matrix (Test):")
     print(confusion_matrix(y_test_enc, y_test_pred))
 
-    # 13. 存模型（包含 label encoder & feature cols）
+    # 13. 存模型
     model_package = {
         "model": clf,
         "label_encoder": label_encoder,
