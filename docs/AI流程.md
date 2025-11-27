@@ -301,3 +301,34 @@ y_norm = (y - y_center) / shoulder_width
 ---
 
 如果你接下來有打算用某個具體技術棧（例如 Python + MediaPipe + scikit-learn），我可以直接幫你寫一份「專案資料夾結構＋關鍵程式檔要做什麼」的範本，甚至加上 pseudo-code，讓你照著填就好。
+
+
+
+
+接下來你整個流程就是：
+
+錄好所有影片 → 放進對應 data_raw/... 資料夾
+
+抽 landmarks：
+
+python scripts/extract_landmarks.py
+
+
+資料增強：
+
+python scripts/augment_dataset.py --num-aug 3
+
+
+訓練姿勢模型：
+
+python scripts/train_posture_model.py
+
+
+訓練壓力模型：
+
+python scripts/train_stress_model.py
+
+
+即時 demo：
+
+python scripts/realtime_demo.py
