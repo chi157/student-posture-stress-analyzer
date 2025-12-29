@@ -1,0 +1,8 @@
+# MediaPipe 姿勢與手部偵測
+mediapipe>=0.10.0
+
+# OpenCV 影像處理
+opencv-python>=4.8.0
+
+# 數值計算
+numpy>=1.24.0

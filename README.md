@@ -1,6 +1,6 @@
 # 📘 Student Posture & Stress Detection
 
-基於 MediaPipe + RandomForest + 自建資料集的**學生坐姿偵測**、**專注度偵測**、**壓力行為偵測**專案。
+基於 **MediaPipe** 的**學生坐姿偵測**、**專注度偵測**、**壓力行為偵測**專案。
 
 本專案提供：
 
@@ -12,8 +12,7 @@
 
 並且支援：
 
-* 自己錄影建立資料集
-* 資料增強（Data Augmentation）
+* 純 MediaPipe 規則式檢測，無需訓練模型
 * 以 CPU/GPU 執行
 * 可在 Windows / macOS / Linux 運行
 
@@ -24,73 +23,48 @@
 ```
 student_posture_stress/
 │
-├─ data_raw/                  # 原始錄影資料
-│   ├─ posture/
-│   ├─ stress/
-│   └─ baseline/
-│
-├─ data_landmarks/            # extract_landmarks.py 輸出
-│   └─ all_landmarks.csv
-│
-├─ data_augmented/            # augment_dataset.py 輸出
-│   └─ all_landmarks_augmented.csv
-│
-├─ models/
-│   ├─ posture_model.joblib
-│   └─ stress_model.joblib
-│
 ├─ scripts/
-│   ├─ extract_landmarks.py
-│   ├─ augment_dataset.py
-│   ├─ train_posture_model.py
-│   ├─ train_stress_model.py
-│   ├─ realtime_demo.py
+│   ├─ realtime_demo.py        # 即時偵測主程式
 │   └─ utils/
 │       ├─ __init__.py
-│       ├─ data_utils.py
-│       ├─ feature_utils.py
-│       └─ landmark_utils.py
+│       ├─ posture_detector.py # 姿勢檢測邏輯
+│       ├─ stress_detector.py  # 壓力行為檢測邏輯
+│       └─ landmark_utils.py   # MediaPipe 相關工具
 │
 └─ README.md
 ```
 
 ---
 
-# 🎥 資料收集指引
+# � 偵測功能說明
 
-每種行為拍 **三段影片**（每段 10–15 秒）。
+## 姿勢偵測（Posture Detection）
 
-## 姿勢（posture）
+透過 MediaPipe Pose 關鍵點分析，自動偵測：
 
-| 行為              | 用途說明        |
-| --------------- | ----------- |
-| good_posture    | 正常坐姿、挺直     |
-| slouch          | 駝背 / 彎腰     |
-| look_left       | 把臉往左偏       |
-| look_right      | 把臉往右偏       |
-| look_down       | 低頭看書 / 桌面   |
-| lean_left       | 身體歪到左邊      |
-| lean_right      | 身體歪到右邊      |
-| far_from_screen | 人遠離鏡頭（距離拉開） |
-
----
-
-## 壓力行為（stress）
-
-| 行為           | 用途說明      |
-| ------------ | --------- |
-| head_touch   | 抓頭        |
-| forehead_rub | 揉額頭       |
-| chin_support | 手托下巴      |
-| frown        | 皺眉，搭配臉部肌肉 |
+| 姿勢              | 偵測方式                |
+| --------------- | ------------------- |
+| good_posture    | 身體挺直、肩膀水平           |
+| slouch          | 肩膀明顯下沉、駝背           |
+| look_left       | 臉部朝向左側              |
+| look_right      | 臉部朝向右側              |
+| look_down       | 頭部向下傾斜              |
+| lean_left       | 身體重心偏左              |
+| lean_right      | 身體重心偏右              |
+| far_from_screen | 人體關鍵點距離鏡頭過遠（整體縮小） |
 
 ---
 
-## baseline（非必要）
+## 壓力行為偵測（Stress Detection）
 
-| 行為      | 用途       |
-| ------- | -------- |
-| neutral | 靜坐、不明顯動作 |
+透過 MediaPipe Holistic（手部 + 臉部）關鍵點分析：
+
+| 行為           | 偵測方式        |
+| ------------ | ----------- |
+| head_touch   | 手部接觸頭部區域    |
+| forehead_rub | 手部在額頭區域移動   |
+| chin_support | 手部支撐下巴位置    |
+| frown        | 臉部眉毛區域變化（選用） |
 
 ---
 
@@ -100,84 +74,51 @@ student_posture_stress/
 
 ```
 pip install -r requirements.txt
+```快速開始（兩步驟即可運行）**
+
+## 1️⃣ 安裝環境
+
+```bash
+pip install -r requirements.txt
 ```
+
+需要的套件：
+- mediapipe
+- opencv-python
+- numpy
 
 ---
 
-## 2️⃣ 收集資料 → 放在 data_raw/
+## 2️⃣ 啟動 Webcam 即時偵測
 
-例如：
-
-```
-data_raw/posture/good_posture_1.mp4
-data_raw/stress/head_touch_1.mp4
-```
-
----
-
-## 3️⃣ 抽取 landmarks
-
-```
-python scripts/extract_landmarks.py
-```
-
-輸出：
-
-```
-data_landmarks/all_landmarks.csv
-```
-
----
-
-## 4️⃣ 資料增強（推薦）
-
-```
-python scripts/augment_dataset.py --num-aug 3
-```
-
-輸出：
-
-```
-data_augmented/all_landmarks_augmented.csv
-```
-
----
-
-## 5️⃣ 訓練姿勢模型
-
-```
-python scripts/train_posture_model.py
-```
-
----
-
-## 6️⃣ 訓練壓力模型
-
-```
-python scripts/train_stress_model.py
-```
-
----
-
-## 7️⃣ 使用 Webcam 即時偵測
-
-```
+```bash
 python scripts/realtime_demo.py
 ```
 
-可同時輸出：
+系統會自動開啟 Webcam 並即時顯示：
 
-* 姿勢分類
-* 壓力行為分類
-* 專注狀態（良好 / 分心）
-* 專注度時長統計（秒）
-* 壓力行為次數（次）
+* ✅ **姿勢分類**（良好坐姿 / 駝背 / 向左看 / 向右看 / 低頭等）
+* ⚠️ **壓力行為分類**（抓頭 / 揉額頭 / 托腮等）
+* 🎯 **專注狀態**（FOCUSED / DISTRACTED）
+* ⏱️ **連續專注時長**（秒）
+* 📊 **累積專注時長**（秒）
+* 🔔 **壓力事件次數**（次）
 
 ---
 
-# 🖥️ 目前 GPU / CPU 支援說明
+## 🔧 偵測邏輯說明
 
-MediaPipe Pose **基本上依賴 CPU**，沒有硬性要求 GPU。
+本專案使用 **MediaPipe** 提供的人體姿態和手部關鍵點，透過**規則式判斷**進行偵測：
+
+- **姿勢偵測**：分析肩膀、頭部、身體角度和距離
+- **壓力行為偵測**：計算手部與臉部的相對位置
+- **專注度判斷**：根據姿勢是否為良好坐姿來計算
+
+**優點**：
+- 無需訓練資料集
+- 無需訓練模型
+- 即裝即用
+- 適合快速原型開發ose **基本上依賴 CPU**，沒有硬性要求 GPU。
 
 但如果你未來換深度學習模型（如 MoveNet / BlazePose GPU 最佳化），建議以下規格：
 
@@ -208,27 +149,24 @@ MediaPipe Pose **基本上依賴 CPU**，沒有硬性要求 GPU。
 
 ## 1️⃣ 連續專注秒數（Continuous Focus Time）
 
-* 表示「目前這一段時間」使用者已經連續維持專注狀態多久
-* 當姿勢模型判定為 **良好坐姿 / good_posture 類** 時，就屬於專注狀態
-* 若發生分心（如看左、看右、低頭），計時將自動歸零並重新開始
+* 表示「目硬體需求
 
-**用途：**
+MediaPipe **主要使用 CPU 運算**，一般筆電 / 桌電即可流暢運行。
 
-* 查看學生是否持續維持注意力
-* 可用於設定「專注多久才算達標」（例如連續專注 10 秒即視為成功）
+## ✔ 建議配置
 
-畫面顯示範例：
+| 硬體    | 需求           |
+| ----- | ------------ |
+| CPU   | Intel i5 或以上 |
+| RAM   | 4GB 以上      |
+| Webcam | 任何 USB 攝影機  |
 
-```
-Continuous focus: 12 s
-```
+## 效能表現
 
----
+- 標準筆電：可達 **20-30 FPS**
+- 桌上型電腦：可達 **30+ FPS**
 
-## 2️⃣ 累積專注秒數（Total Focus Time）
-
-* 表示從即時偵測開始到目前為止
-  **所有 GOOD 專注狀態的累積秒數**
+> 💡 **提示**：MediaPipe 已經過高度優化，GPU 加速效果有限。CPU 版本即可滿足即時偵測需求
 * 不會因為中途分心而歸零
 * 若重新啟動程式，計時會重新開始
 

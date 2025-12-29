@@ -1,322 +1,269 @@
 """
-realtime_demo.py
-================
-
-用途：
-    使用 webcam + MediaPipe Pose 即時抓取姿態 landmarks，
-    並載入：
-        - models/posture_model.joblib
-        - models/stress_model.joblib
-    做「姿勢分類」與「壓力行為分類」，顯示在畫面上。
-
-    額外統計：
-        - 連續專注秒數（目前這一段連續專注的時間）
-        - 累積專注秒數（本次執行以來，所有專注時間總和）
-        - 壓力行為事件次數（每當壓力類別改變一次就 +1）
-
-專注判定邏輯（簡易版，依姿勢模型輸出文字）：
-    - Posture label 內含 "good"      -> Focus: GOOD
-    - Posture label 內含 "lookleft" / "lookright" / "lookdown"
-                                    -> Focus: DISTRACTED
-    - 其他                             -> Focus: UNKNOWN
-
-使用方式（建議在專案根目錄執行）：
-
-    # 最標準方式（確保 scripts 是 package）
-    python -m scripts.realtime_demo
-
-    # 或指定攝影機 index / 模型路徑：
-    python -m scripts.realtime_demo --camera-index 0 ^
-        --posture-model models/posture_model.joblib ^
-        --stress-model models/stress_model.joblib
-
-操作：
-    - 在顯示視窗時按下 'q' 離開。
-
-前置條件：
-    - 已經執行過：
-        python scripts/extract_landmarks.py
-        python scripts/augment_dataset.py --num-aug 3
-        python -m scripts.train_posture_model
-        python -m scripts.train_stress_model
-
-需要套件（建議寫在 requirements.txt）：
-    - opencv-python
-    - mediapipe
-    - numpy
-    - joblib
+學生坐姿與壓力即時偵測系統
+使用 Webcam 進行即時姿勢與壓力行為偵測
 """
 
-import argparse
+import cv2
 import time
+import sys
 from pathlib import Path
 
-import cv2
-import mediapipe as mp
-import joblib
+# 加入 utils 模組路徑
+sys.path.append(str(Path(__file__).parent))
 
-from scripts.utils.landmark_utils import build_feature_vector_from_pose
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-MODELS_DIR = PROJECT_ROOT / "models"
+from utils.landmark_utils import LandmarkExtractor
+from utils.posture_detector import PostureDetector
+from utils.stress_detector import StressDetector
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Webcam 即時姿勢 / 壓力行為偵測 Demo（含專注統計）")
-
-    parser.add_argument(
-        "--posture-model",
-        type=str,
-        default=str(MODELS_DIR / "posture_model.joblib"),
-        help="姿勢模型路徑（預設：models/posture_model.joblib）",
-    )
-
-    parser.add_argument(
-        "--stress-model",
-        type=str,
-        default=str(MODELS_DIR / "stress_model.joblib"),
-        help="壓力模型路徑（預設：models/stress_model.joblib）",
-    )
-
-    parser.add_argument(
-        "--camera-index",
-        type=int,
-        default=0,
-        help="Webcam index（預設 0）",
-    )
-
-    return parser.parse_args()
-
-
-def load_model_package(path: Path):
-    """
-    載入 train_*_model.py 存好的 joblib 包裝：
-        {
-            "model": clf,
-            "label_encoder": label_encoder,
-            "feature_columns": feature_cols,
-            "target_col": target_col,
-        }
-    """
-    if not path.exists():
-        print(f"[WARN] 找不到模型檔：{path}")
-        return None
-
-    pkg = joblib.load(path)
-    required_keys = ["model", "label_encoder", "feature_columns"]
-    for k in required_keys:
-        if k not in pkg:
-            raise ValueError(f"模型檔缺少 key: {k}")
-
-    print(f"[INFO] 已載入模型：{path}")
-    print(f"       使用特徵數量：{len(pkg['feature_columns'])}")
-    print(f"       類別：{list(pkg['label_encoder'].classes_)}")
-
-    return pkg
+class RealtimeDetectionSystem:
+    """即時偵測系統主類別"""
+    
+    def __init__(self):
+        """初始化系統元件"""
+        print("🔧 初始化系統...")
+        
+        # 初始化各個偵測器
+        self.landmark_extractor = LandmarkExtractor()
+        self.posture_detector = PostureDetector()
+        self.stress_detector = StressDetector()
+        
+        # 專注度統計
+        self.continuous_focus_time = 0.0  # 連續專注秒數
+        self.total_focus_time = 0.0       # 累積專注秒數
+        self.stress_event_count = 0       # 壓力事件次數
+        
+        # 時間記錄
+        self.last_time = time.time()
+        self.last_focused = False
+        
+        # 視窗設定
+        self.window_name = "學生坐姿與壓力偵測系統"
+        
+        print("✅ 系統初始化完成！")
+    
+    def run(self):
+        """執行即時偵測"""
+        # 開啟 Webcam
+        cap = cv2.VideoCapture(0)
+        
+        if not cap.isOpened():
+            print("❌ 無法開啟 Webcam！")
+            return
+        
+        print("📹 Webcam 已開啟")
+        print("💡 按 'q' 或 'ESC' 離開")
+        print("-" * 50)
+        
+        # 設定視窗
+        cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+        
+        try:
+            while True:
+                # 讀取影格
+                ret, frame = cap.read()
+                if not ret:
+                    print("❌ 無法讀取影像")
+                    break
+                
+                # 翻轉影像（鏡像效果）
+                frame = cv2.flip(frame, 1)
+                
+                # 處理影格
+                frame = self._process_frame(frame)
+                
+                # 顯示影像
+                cv2.imshow(self.window_name, frame)
+                
+                # 檢查按鍵
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q') or key == 27:  # 'q' 或 ESC
+                    break
+        
+        finally:
+            # 清理資源
+            cap.release()
+            cv2.destroyAllWindows()
+            self.landmark_extractor.close()
+            
+            # 顯示最終統計
+            self._print_final_stats()
+    
+    def _process_frame(self, frame):
+        """
+        處理單一影格
+        
+        參數:
+            frame: 影像
+            
+        回傳:
+            frame: 處理後的影像
+        """
+        # 提取關鍵點
+        results = self.landmark_extractor.process_frame(frame)
+        
+        # 取得關鍵點資料
+        pose_landmarks = self.landmark_extractor.get_pose_landmarks(results)
+        left_hand = self.landmark_extractor.get_hand_landmarks(results, 'left')
+        right_hand = self.landmark_extractor.get_hand_landmarks(results, 'right')
+        face_landmarks = self.landmark_extractor.get_face_landmarks(results)
+        
+        # 偵測姿勢
+        posture, posture_conf = self.posture_detector.detect_posture(pose_landmarks)
+        
+        # 偵測壓力行為
+        stress_behavior, stress_conf = self.stress_detector.detect_stress_behavior(
+            pose_landmarks, left_hand, right_hand, face_landmarks
+        )
+        
+        # 更新統計資料
+        self._update_statistics(posture, stress_behavior)
+        
+        # 繪製關鍵點
+        frame = self.landmark_extractor.draw_landmarks(frame, results)
+        
+        # 繪製資訊介面
+        frame = self._draw_hud(frame, posture, posture_conf, stress_behavior, stress_conf)
+        
+        return frame
+    
+    def _update_statistics(self, posture, stress_behavior):
+        """
+        更新統計資料
+        
+        參數:
+            posture: 當前姿勢
+            stress_behavior: 當前壓力行為
+        """
+        # 計算時間差
+        current_time = time.time()
+        delta_time = current_time - self.last_time
+        self.last_time = current_time
+        
+        # 判斷是否專注
+        is_focused = self.posture_detector.is_focused(posture)
+        
+        if is_focused:
+            # 專注狀態：累加時間
+            self.continuous_focus_time += delta_time
+            self.total_focus_time += delta_time
+            self.last_focused = True
+        else:
+            # 分心狀態：重置連續專注時間
+            if self.last_focused:
+                self.continuous_focus_time = 0.0
+                self.last_focused = False
+        
+        # 檢查壓力行為是否改變（計算事件次數）
+        if self.stress_detector.is_behavior_changed(stress_behavior):
+            self.stress_event_count += 1
+    
+    def _draw_hud(self, frame, posture, posture_conf, stress_behavior, stress_conf):
+        """
+        繪製抬頭顯示器（HUD）
+        
+        參數:
+            frame: 影像
+            posture: 姿勢類別
+            posture_conf: 姿勢信心度
+            stress_behavior: 壓力行為類別
+            stress_conf: 壓力行為信心度
+            
+        回傳:
+            frame: 繪製後的影像
+        """
+        h, w = frame.shape[:2]
+        
+        # 設定字體
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        
+        # 判斷專注狀態
+        is_focused = self.posture_detector.is_focused(posture)
+        focus_status = "FOCUSED 🎯" if is_focused else "DISTRACTED ⚠️"
+        focus_color = (0, 255, 0) if is_focused else (0, 165, 255)
+        
+        # === 左上角：姿勢資訊 ===
+        y_offset = 40
+        
+        # 姿勢標籤
+        posture_label = self.posture_detector.get_posture_label(posture)
+        cv2.putText(frame, f"Posture: {posture_label}", (20, y_offset), 
+                    font, 0.7, (255, 255, 255), 2)
+        y_offset += 35
+        
+        # 信心度
+        cv2.putText(frame, f"Confidence: {posture_conf:.2f}", (20, y_offset), 
+                    font, 0.6, (200, 200, 200), 2)
+        y_offset += 50
+        
+        # 壓力行為標籤
+        behavior_label = self.stress_detector.get_behavior_label(stress_behavior)
+        stress_color = (0, 255, 255) if stress_behavior != "neutral" else (200, 200, 200)
+        cv2.putText(frame, f"Stress: {behavior_label}", (20, y_offset), 
+                    font, 0.7, stress_color, 2)
+        y_offset += 35
+        
+        # 壓力行為信心度
+        cv2.putText(frame, f"Confidence: {stress_conf:.2f}", (20, y_offset), 
+                    font, 0.6, (200, 200, 200), 2)
+        
+        # === 右上角：專注狀態 ===
+        focus_text = focus_status
+        text_size = cv2.getTextSize(focus_text, font, 1.0, 2)[0]
+        cv2.putText(frame, focus_text, (w - text_size[0] - 20, 50), 
+                    font, 1.0, focus_color, 3)
+        
+        # === 右下角：統計資訊 ===
+        stats_x = w - 350
+        stats_y = h - 130
+        
+        # 半透明背景
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (stats_x - 10, stats_y - 40), 
+                     (w - 10, h - 10), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+        
+        # 統計文字
+        cv2.putText(frame, "=== Statistics ===", (stats_x, stats_y), 
+                    font, 0.6, (255, 255, 255), 2)
+        
+        cv2.putText(frame, f"Continuous focus: {int(self.continuous_focus_time)} s", 
+                    (stats_x, stats_y + 30), font, 0.6, (0, 255, 0), 2)
+        
+        cv2.putText(frame, f"Total focus: {int(self.total_focus_time)} s", 
+                    (stats_x, stats_y + 60), font, 0.6, (0, 200, 255), 2)
+        
+        cv2.putText(frame, f"Stress events: {self.stress_event_count}", 
+                    (stats_x, stats_y + 90), font, 0.6, (0, 165, 255), 2)
+        
+        # === 底部：提示訊息 ===
+        tip_text = "Press 'Q' or 'ESC' to exit"
+        tip_size = cv2.getTextSize(tip_text, font, 0.5, 1)[0]
+        cv2.putText(frame, tip_text, ((w - tip_size[0]) // 2, h - 15), 
+                    font, 0.5, (180, 180, 180), 1)
+        
+        return frame
+    
+    def _print_final_stats(self):
+        """顯示最終統計資訊"""
+        print("\n" + "=" * 50)
+        print("📊 最終統計")
+        print("=" * 50)
+        print(f"累積專注時間: {int(self.total_focus_time)} 秒")
+        print(f"壓力事件次數: {self.stress_event_count} 次")
+        print("=" * 50)
+        print("👋 系統已關閉")
 
 
 def main():
-    args = parse_args()
-
-    posture_model_path = Path(args.posture_model)
-    stress_model_path = Path(args.stress_model)
-
-    posture_pkg = load_model_package(posture_model_path)
-    stress_pkg = load_model_package(stress_model_path)
-
-    if posture_pkg is None and stress_pkg is None:
-        print("[ERROR] 姿勢與壓力模型都沒載入成功，無法執行 demo。")
-        return
-
-    mp_pose = mp.solutions.pose
-    mp_drawing = mp.solutions.drawing_utils
-    mp_styles = mp.solutions.drawing_styles
-
-    cap = cv2.VideoCapture(args.camera_index)
-    if not cap.isOpened():
-        print(f"[ERROR] 無法開啟攝影機 index={args.camera_index}")
-        return
-
-    print("[INFO] 按 'q' 離開。")
-
-    # ===== 專注與壓力相關的狀態變數 =====
-    focus_state = "UNKNOWN"           # "GOOD" / "DISTRACTED" / "UNKNOWN"
-    focus_start_time = None           # 目前這一段專注開始的時間戳
-    continuous_focus_seconds = 0.0    # 目前這一段連續專注秒數
-    total_focus_seconds = 0.0         # 本次執行累積專注秒數
-    last_time = time.time()           # 用來估計每幀時間間隔
-
-    stress_event_count = 0            # 壓力事件次數
-    last_stress_label = None          # 上一幀的壓力類別（用來判斷「事件」次數）
-
-    with mp_pose.Pose(
-        static_image_mode=False,
-        model_complexity=1,
-        enable_segmentation=False,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5,
-    ) as pose:
-
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                print("[WARN] 無法讀取畫面，結束。")
-                break
-
-            now = time.time()
-            dt = now - last_time
-            if dt < 0:
-                dt = 0.0
-            last_time = now
-
-            image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            image_rgb.flags.writeable = False
-            results = pose.process(image_rgb)
-            image_rgb.flags.writeable = True
-
-            if results.pose_landmarks:
-                mp_drawing.draw_landmarks(
-                    frame,
-                    results.pose_landmarks,
-                    mp_pose.POSE_CONNECTIONS,
-                    landmark_drawing_spec=mp_styles.get_default_pose_landmarks_style(),
-                )
-
-            posture_text = "Posture: (no model)"
-            stress_text = "Stress: (no model)"
-            focus_text = ""
-
-            # ===== 姿勢推論 =====
-            posture_label_raw = None  # 只存 label，不加前綴字串，方便判斷
-
-            if posture_pkg is not None and results.pose_landmarks:
-                feat = build_feature_vector_from_pose(results, posture_pkg["feature_columns"])
-                if feat is not None:
-                    clf = posture_pkg["model"]
-                    le = posture_pkg["label_encoder"]
-                    pred_idx = clf.predict(feat)[0]
-                    pred_label = le.inverse_transform([pred_idx])[0]
-                    posture_label_raw = str(pred_label)
-                    posture_text = f"Posture: {posture_label_raw}"
-                else:
-                    posture_text = "Posture: no pose"
-
-            # ===== 壓力推論 & 統計壓力事件次數 =====
-            stress_label_raw = None
-
-            if stress_pkg is not None and results.pose_landmarks:
-                feat_s = build_feature_vector_from_pose(results, stress_pkg["feature_columns"])
-                if feat_s is not None:
-                    clf_s = stress_pkg["model"]
-                    le_s = stress_pkg["label_encoder"]
-                    pred_idx_s = clf_s.predict(feat_s)[0]
-                    pred_label_s = le_s.inverse_transform([pred_idx_s])[0]
-                    stress_label_raw = str(pred_label_s)
-                    stress_text = f"Stress: {stress_label_raw}"
-                else:
-                    stress_text = "Stress: no pose"
-
-            # 壓力事件計數邏輯：
-            #   每當「壓力類別」與上一幀不同，就視為一個新的事件。
-            #   （例如：none -> head_touch，或 head_touch -> chin_support）
-            if stress_label_raw is not None:
-                if last_stress_label is None:
-                    # 第一次有預測，不算事件，只記錄
-                    last_stress_label = stress_label_raw
-                else:
-                    if stress_label_raw != last_stress_label:
-                        stress_event_count += 1
-                        last_stress_label = stress_label_raw
-
-            # ===== 專注狀態變化與時間統計 =====
-            # 依姿勢 label 粗略判斷：
-            #   good_*      -> GOOD
-            #   lookleft/ookright/lookdown -> DISTRACTED
-            #   其他        -> UNKNOWN
-            prev_focus_state = focus_state
-
-            if posture_label_raw is None:
-                focus_state = "UNKNOWN"
-            else:
-                label_lower = posture_label_raw.lower()
-                if "good" in label_lower:
-                    focus_state = "GOOD"
-                elif any(k in label_lower for k in ["lookleft", "look_right", "lookright", "lookdown"]):
-                    focus_state = "DISTRACTED"
-                else:
-                    focus_state = "UNKNOWN"
-
-            # 更新專注時間
-            if focus_state == "GOOD":
-                if prev_focus_state != "GOOD":
-                    # 剛剛進入專注狀態
-                    focus_start_time = now
-                    continuous_focus_seconds = 0.0
-                else:
-                    # 持續專注：更新連續專注秒數
-                    if focus_start_time is not None:
-                        continuous_focus_seconds = now - focus_start_time
-                # 無論是不是剛進入 / 持續，只要這一幀是 GOOD，就把 dt 累加到 total_focus_seconds
-                total_focus_seconds += dt
-            else:
-                # 非 GOOD 狀態，連續專注歸零
-                focus_start_time = None
-                continuous_focus_seconds = 0.0
-
-            # 專注狀態文字
-            if focus_state == "GOOD":
-                focus_text = "Focus: GOOD"
-            elif focus_state == "DISTRACTED":
-                focus_text = "Focus: DISTRACTED"
-            else:
-                focus_text = "Focus: UNKNOWN"
-
-            # ===== 畫 HUD（左上：狀態；右下：統計） =====
-            h, w, _ = frame.shape
-
-            # 左上狀態框
-            cv2.rectangle(frame, (5, 5), (440, 120), (0, 0, 0), thickness=-1)
-            cv2.putText(frame, posture_text, (10, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-            cv2.putText(frame, stress_text, (10, 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-            cv2.putText(frame, focus_text, (10, 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-
-            # 右下統計框
-            stats_box_w = 420
-            stats_box_h = 100
-            stats_box_x1 = w - stats_box_w - 5
-            stats_box_y1 = h - stats_box_h - 5
-            stats_box_x2 = w - 5
-            stats_box_y2 = h - 5
-
-            cv2.rectangle(frame,
-                          (stats_box_x1, stats_box_y1),
-                          (stats_box_x2, stats_box_y2),
-                          (0, 0, 0),
-                          thickness=-1)
-
-            # 統計文字內容
-            cont_focus_str = f"Continuous focus: {int(continuous_focus_seconds)} s"
-            total_focus_str = f"Total focus:      {int(total_focus_seconds)} s"
-            stress_count_str = f"Stress events:    {stress_event_count}"
-
-            cv2.putText(frame, cont_focus_str, (stats_box_x1 + 10, stats_box_y1 + 30),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 255), 2)
-            cv2.putText(frame, total_focus_str, (stats_box_x1 + 10, stats_box_y1 + 60),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 255, 200), 2)
-            cv2.putText(frame, stress_count_str, (stats_box_x1 + 10, stats_box_y1 + 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 200, 200), 2)
-
-            cv2.imshow("Realtime Posture & Stress Demo", frame)
-
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                break
-
-    cap.release()
-    cv2.destroyAllWindows()
-    print("[INFO] Demo 結束。")
+    """主程式進入點"""
+    print("=" * 50)
+    print("🎓 學生坐姿與壓力偵測系統")
+    print("=" * 50)
+    
+    # 建立並執行系統
+    system = RealtimeDetectionSystem()
+    system.run()
 
 
 if __name__ == "__main__":
