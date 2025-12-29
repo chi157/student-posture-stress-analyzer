@@ -111,6 +111,11 @@ class RealtimeDetectionSystem:
         # 偵測姿勢
         posture, posture_conf = self.posture_detector.detect_posture(pose_landmarks)
         
+        # 如果是專注狀態且有臉部關鍵點，更新皺眉基準值
+        is_focused = self.posture_detector.is_focused(posture)
+        if is_focused and face_landmarks is not None:
+            self.stress_detector.update_baseline(face_landmarks)
+        
         # 偵測壓力行為
         stress_behavior, stress_conf = self.stress_detector.detect_stress_behavior(
             pose_landmarks, left_hand, right_hand, face_landmarks
@@ -144,12 +149,12 @@ class RealtimeDetectionSystem:
         is_focused = self.posture_detector.is_focused(posture)
         
         if is_focused:
-            # 專注狀態：累加時間
+            # 專注狀態：累加連續專注時間和總專注時間
             self.continuous_focus_time += delta_time
             self.total_focus_time += delta_time
             self.last_focused = True
         else:
-            # 分心狀態：重置連續專注時間
+            # 分心狀態：重置連續專注時間，但不累加總專注時間
             if self.last_focused:
                 self.continuous_focus_time = 0.0
                 self.last_focused = False
@@ -179,15 +184,15 @@ class RealtimeDetectionSystem:
         
         # 判斷專注狀態
         is_focused = self.posture_detector.is_focused(posture)
-        focus_status = "FOCUSED 🎯" if is_focused else "DISTRACTED ⚠️"
+        focus_status = "FOCUSED" if is_focused else "DISTRACTED"
         focus_color = (0, 255, 0) if is_focused else (0, 165, 255)
         
         # === 左上角：姿勢資訊 ===
         y_offset = 40
         
-        # 姿勢標籤
-        posture_label = self.posture_detector.get_posture_label(posture)
-        cv2.putText(frame, f"Posture: {posture_label}", (20, y_offset), 
+        # 姿勢標籤（使用英文標籤）
+        posture_label_en = self._get_posture_label_en(posture)
+        cv2.putText(frame, f"Posture: {posture_label_en}", (20, y_offset), 
                     font, 0.7, (255, 255, 255), 2)
         y_offset += 35
         
@@ -196,10 +201,10 @@ class RealtimeDetectionSystem:
                     font, 0.6, (200, 200, 200), 2)
         y_offset += 50
         
-        # 壓力行為標籤
-        behavior_label = self.stress_detector.get_behavior_label(stress_behavior)
+        # 壓力行為標籤（使用英文標籤）
+        behavior_label_en = self._get_stress_label_en(stress_behavior)
         stress_color = (0, 255, 255) if stress_behavior != "neutral" else (200, 200, 200)
-        cv2.putText(frame, f"Stress: {behavior_label}", (20, y_offset), 
+        cv2.putText(frame, f"Stress: {behavior_label_en}", (20, y_offset), 
                     font, 0.7, stress_color, 2)
         y_offset += 35
         
@@ -244,21 +249,49 @@ class RealtimeDetectionSystem:
         
         return frame
     
+    def _get_posture_label_en(self, posture):
+        """取得姿勢的英文標籤"""
+        labels = {
+            "good_posture": "Good Posture",
+            "slouch": "Slouching",
+            "look_left": "Looking Left",
+            "look_right": "Looking Right",
+            "look_down": "Looking Down",
+            "look_up": "Looking Up",
+            "lean_left": "Leaning Left",
+            "lean_right": "Leaning Right",
+            "far_from_screen": "Far from Screen",
+            "no_person": "No Person",
+            "unknown": "Unknown"
+        }
+        return labels.get(posture, posture)
+    
+    def _get_stress_label_en(self, behavior):
+        """取得壓力行為的英文標籤"""
+        labels = {
+            "neutral": "None",
+            "head_touch": "Touching Head",
+            "forehead_rub": "Rubbing Forehead",
+            "chin_support": "Chin Support",
+            "frown": "Frowning"
+        }
+        return labels.get(behavior, behavior)
+    
     def _print_final_stats(self):
         """顯示最終統計資訊"""
         print("\n" + "=" * 50)
-        print("📊 最終統計")
+        print("Final Statistics")
         print("=" * 50)
-        print(f"累積專注時間: {int(self.total_focus_time)} 秒")
-        print(f"壓力事件次數: {self.stress_event_count} 次")
+        print(f"Total Focus Time: {int(self.total_focus_time)} seconds")
+        print(f"Stress Events: {self.stress_event_count} times")
         print("=" * 50)
-        print("👋 系統已關閉")
+        print("System Closed")
 
 
 def main():
     """主程式進入點"""
     print("=" * 50)
-    print("🎓 學生坐姿與壓力偵測系統")
+    print("test")
     print("=" * 50)
     
     # 建立並執行系統

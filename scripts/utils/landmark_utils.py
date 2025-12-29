@@ -18,11 +18,12 @@ class LandmarkExtractor:
         self.mp_drawing = mp.solutions.drawing_utils
         self.mp_drawing_styles = mp.solutions.drawing_styles
         
-        # 建立 Holistic 模型
+        # 建立 Holistic 模型（提高追蹤信心值減少跳動）
         self.holistic = self.mp_holistic.Holistic(
-            min_detection_confidence=0.5,  # 最小偵測信心值
-            min_tracking_confidence=0.5,   # 最小追蹤信心值
-            model_complexity=1             # 模型複雜度 (0, 1, 2)
+            min_detection_confidence=0.5,   # 最小偵測信心值
+            min_tracking_confidence=0.9,    # 提高追蹤信心值到 0.9
+            model_complexity=1,             # 模型複雜度 (0, 1, 2)
+            smooth_landmarks=True           # 啟用平滑處理
         )
     
     def process_frame(self, frame):
